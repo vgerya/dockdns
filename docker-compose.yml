@@ -11,6 +11,7 @@ services:
       - DNS_LABEL=${DNS_LABEL:-dns.hostname}
       - BASE_DOMAIN=${BASE_DOMAIN:-}
       - DOCKER_HOST_IP=${DOCKER_HOST_IP}
+      - ENV_PREFIX=${ENV_PREFIX}
       - INSTANCE_ID=${INSTANCE_ID}
       - STATE_DIR=${STATE_DIR:-/shared-state}
     volumes:

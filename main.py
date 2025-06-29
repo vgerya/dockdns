@@ -82,13 +82,15 @@ class PiHoleDNSManager:
 class DockerEventMonitor:
     def __init__(self, dns_manager: PiHoleDNSManager, dns_label: str = 'dns.hostname', 
                  base_domain: str = '', docker_host_ip: Optional[str] = None, 
-                 instance_id: Optional[str] = None, state_dir: str = '/shared-state'):
+                 instance_id: Optional[str] = None, state_dir: str = '/shared-state',
+                 env_prefix: str = ''):
         self.client = docker.from_env()
         self.dns_manager = dns_manager
         self.dns_label = dns_label
         self.base_domain = base_domain
         self.docker_host_ip = docker_host_ip or self._get_docker_host_ip()
         self.instance_id = instance_id or self._generate_instance_id()
+        self.env_prefix = env_prefix or self._generate_env_prefix()
         self.state_dir = state_dir
         self.state_file = os.path.join(state_dir, 'docker-dns-shared-state.json')
         self.container_dns_records: Dict[str, tuple] = {}
@@ -99,6 +101,14 @@ class DockerEventMonitor:
         docker_host = os.getenv('DOCKER_HOST', 'unix:///var/run/docker.sock')
         unique_string = f"{hostname}-{docker_host}-{self.base_domain}"
         return hashlib.md5(unique_string.encode()).hexdigest()[:8]
+    
+    def _generate_env_prefix(self) -> str:
+        hostname = socket.gethostname()
+        # Clean hostname for DNS compatibility (remove special chars, lowercase)
+        clean_hostname = ''.join(c for c in hostname if c.isalnum() or c == '-').lower().strip('-')
+        if len(clean_hostname) > 10:
+            clean_hostname = clean_hostname[:10]
+        return clean_hostname or 'env'
     
     def _get_docker_host_ip(self) -> str:
         try:
@@ -162,6 +172,7 @@ class DockerEventMonitor:
             shared_state['instances'][self.instance_id] = {
                 'hostname': socket.gethostname(),
                 'base_domain': self.base_domain,
+                'env_prefix': self.env_prefix,
                 'last_seen': time.time(),
                 'records': {k: list(v) for k, v in self.container_dns_records.items()}
             }
@@ -180,9 +191,15 @@ class DockerEventMonitor:
             if not container_name or container_name.startswith('/'):
                 return None
             hostname = container_name.lstrip('/')
+        
+        # Add environment prefix to avoid conflicts across Docker environments
+        if self.env_prefix and not hostname.startswith(f"{self.env_prefix}-"):
+            hostname = f"{self.env_prefix}-{hostname}"
             
         if self.base_domain and '{container-name}' in self.base_domain:
             hostname = self.base_domain.replace('{container-name}', hostname)
+        elif self.base_domain and '{env-prefix}' in self.base_domain:
+            hostname = self.base_domain.replace('{env-prefix}', self.env_prefix).replace('{container-name}', hostname.replace(f"{self.env_prefix}-", ""))
         elif self.base_domain:
             hostname = f"{hostname}.{self.base_domain}"
             
@@ -330,6 +347,7 @@ def main():
     docker_host_ip = os.getenv('DOCKER_HOST_IP')
     instance_id = os.getenv('INSTANCE_ID')
     state_dir = os.getenv('STATE_DIR', '/shared-state')
+    env_prefix = os.getenv('ENV_PREFIX', '')
     
     if not pihole_url:
         logger.error("PIHOLE_URL environment variable is required")
@@ -344,9 +362,10 @@ def main():
         logger.info(f"Using Docker host IP: {docker_host_ip}")
     
     dns_manager = PiHoleDNSManager(pihole_url, api_token)
-    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id, state_dir)
+    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id, state_dir, env_prefix)
     
     logger.info(f"Service instance ID: {monitor.instance_id}")
+    logger.info(f"Environment prefix: {monitor.env_prefix}")
     
     try:
         monitor.monitor_events()
