@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  docker-events-dns:
+    build: .
+    container_name: docker-events-dns
+    restart: unless-stopped
+    environment:
+      - PIHOLE_URL=${PIHOLE_URL:-http://pihole.local}
+      - PIHOLE_API_TOKEN=${PIHOLE_API_TOKEN}
+      - DNS_LABEL=${DNS_LABEL:-dns.hostname}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-events-dns-network
+
+networks:
+  docker-events-dns-network:
+    driver: bridge

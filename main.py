@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+
+import os
+import time
+import logging
+import requests
+import docker
+import socket
+from typing import Optional, Dict, List, Set
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class PiHoleDNSManager:
+    def __init__(self, pihole_url: str, api_token: Optional[str] = None):
+        self.pihole_url = pihole_url.rstrip('/')
+        self.api_token = api_token
+        self.session = requests.Session()
+        
+    def add_dns_record(self, hostname: str, ip: str) -> bool:
+        try:
+            url = f"{self.pihole_url}/admin/scripts/pi-hole/php/customdns.php"
+            data = {
+                'action': 'add',
+                'domain': hostname,
+                'ip': ip
+            }
+            if self.api_token:
+                data['auth'] = self.api_token
+                
+            response = self.session.post(url, data=data)
+            response.raise_for_status()
+            logger.info(f"Added DNS record: {hostname} -> {ip}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add DNS record {hostname} -> {ip}: {e}")
+            return False
+    
+    def remove_dns_record(self, hostname: str, ip: str) -> bool:
+        try:
+            url = f"{self.pihole_url}/admin/scripts/pi-hole/php/customdns.php"
+            data = {
+                'action': 'delete',
+                'domain': hostname,
+                'ip': ip
+            }
+            if self.api_token:
+                data['auth'] = self.api_token
+                
+            response = self.session.post(url, data=data)
+            response.raise_for_status()
+            logger.info(f"Removed DNS record: {hostname} -> {ip}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove DNS record {hostname} -> {ip}: {e}")
+            return False
+    
+    def get_dns_records(self) -> List[Dict[str, str]]:
+        try:
+            url = f"{self.pihole_url}/admin/scripts/pi-hole/php/customdns.php"
+            params = {'action': 'get'}
+            if self.api_token:
+                params['auth'] = self.api_token
+                
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            
+            records = []
+            for line in response.text.strip().split('\n'):
+                if line and ' ' in line:
+                    parts = line.split(' ', 1)
+                    if len(parts) == 2:
+                        records.append({'ip': parts[0], 'domain': parts[1]})
+            return records
+        except Exception as e:
+            logger.error(f"Failed to get DNS records: {e}")
+            return []
+
+class DockerEventMonitor:
+    def __init__(self, dns_manager: PiHoleDNSManager, dns_label: str = 'dns.hostname', 
+                 base_domain: str = '', docker_host_ip: Optional[str] = None):
+        self.client = docker.from_env()
+        self.dns_manager = dns_manager
+        self.dns_label = dns_label
+        self.base_domain = base_domain
+        self.docker_host_ip = docker_host_ip or self._get_docker_host_ip()
+        self.container_dns_records: Dict[str, tuple] = {}
+        
+    def _get_docker_host_ip(self) -> str:
+        try:
+            docker_host = os.getenv('DOCKER_HOST', 'unix:///var/run/docker.sock')
+            if docker_host.startswith('tcp://'):
+                host = docker_host.replace('tcp://', '').split(':')[0]
+                return host
+            else:
+                return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return '127.0.0.1'
+        
+    def get_container_hostname(self, container) -> Optional[str]:
+        labels = container.labels or {}
+        
+        if self.dns_label in labels:
+            hostname = labels[self.dns_label]
+        else:
+            container_name = container.name
+            if not container_name or container_name.startswith('/'):
+                return None
+            hostname = container_name.lstrip('/')
+            
+        if self.base_domain and '{container-name}' in self.base_domain:
+            hostname = self.base_domain.replace('{container-name}', hostname)
+        elif self.base_domain:
+            hostname = f"{hostname}.{self.base_domain}"
+            
+        return hostname
+    
+    def get_container_ip(self, container) -> Optional[str]:
+        try:
+            container.reload()
+            network_mode = container.attrs.get('HostConfig', {}).get('NetworkMode', '')
+            
+            if network_mode == 'host':
+                return self.docker_host_ip
+            
+            networks = container.attrs['NetworkSettings']['Networks']
+            for network_name, network_info in networks.items():
+                if network_info.get('IPAddress'):
+                    return network_info['IPAddress']
+                    
+        except Exception as e:
+            logger.error(f"Failed to get IP for container {container.name}: {e}")
+        return None
+    
+    def handle_container_start(self, container):
+        hostname = self.get_container_hostname(container)
+        if not hostname:
+            logger.debug(f"No hostname found for container {container.name}")
+            return
+            
+        ip = self.get_container_ip(container)
+        if not ip:
+            logger.warning(f"No IP found for container {container.name}")
+            return
+            
+        if self.dns_manager.add_dns_record(hostname, ip):
+            self.container_dns_records[container.id] = (hostname, ip)
+    
+    def handle_container_stop(self, container_id: str):
+        if container_id in self.container_dns_records:
+            hostname, ip = self.container_dns_records[container_id]
+            if self.dns_manager.remove_dns_record(hostname, ip):
+                del self.container_dns_records[container_id]
+    
+    def cleanup_stale_dns_records(self):
+        logger.info("Cleaning up stale DNS records...")
+        try:
+            existing_records = self.dns_manager.get_dns_records()
+            running_containers = self.client.containers.list(filters={'status': 'running'})
+            
+            expected_hostnames = set()
+            for container in running_containers:
+                hostname = self.get_container_hostname(container)
+                if hostname:
+                    expected_hostnames.add(hostname)
+            
+            for record in existing_records:
+                domain = record['domain']
+                ip = record['ip']
+                
+                if self.base_domain and domain.endswith(f".{self.base_domain}"):
+                    if domain not in expected_hostnames:
+                        logger.info(f"Removing stale DNS record: {domain} -> {ip}")
+                        self.dns_manager.remove_dns_record(domain, ip)
+                elif not self.base_domain and domain in [r[0] for r in self.container_dns_records.values()]:
+                    if domain not in expected_hostnames:
+                        logger.info(f"Removing stale DNS record: {domain} -> {ip}")
+                        self.dns_manager.remove_dns_record(domain, ip)
+                        
+        except Exception as e:
+            logger.error(f"Failed to cleanup stale DNS records: {e}")
+    
+    def sync_existing_containers(self):
+        logger.info("Syncing existing running containers...")
+        try:
+            containers = self.client.containers.list(filters={'status': 'running'})
+            for container in containers:
+                self.handle_container_start(container)
+        except Exception as e:
+            logger.error(f"Failed to sync existing containers: {e}")
+    
+    def monitor_events(self):
+        logger.info("Starting Docker event monitoring...")
+        self.cleanup_stale_dns_records()
+        self.sync_existing_containers()
+        
+        try:
+            for event in self.client.events(decode=True):
+                if event.get('Type') == 'container':
+                    action = event.get('Action')
+                    container_id = event.get('id')
+                    
+                    if action == 'start':
+                        try:
+                            container = self.client.containers.get(container_id)
+                            self.handle_container_start(container)
+                        except docker.errors.NotFound:
+                            logger.warning(f"Container {container_id} not found")
+                    
+                    elif action in ['stop', 'die', 'kill']:
+                        self.handle_container_stop(container_id)
+                        
+        except KeyboardInterrupt:
+            logger.info("Shutting down...")
+        except Exception as e:
+            logger.error(f"Error monitoring events: {e}")
+            raise
+
+def main():
+    pihole_url = os.getenv('PIHOLE_URL', 'http://pihole.local')
+    api_token = os.getenv('PIHOLE_API_TOKEN')
+    dns_label = os.getenv('DNS_LABEL', 'dns.hostname')
+    base_domain = os.getenv('BASE_DOMAIN', '')
+    docker_host_ip = os.getenv('DOCKER_HOST_IP')
+    
+    if not pihole_url:
+        logger.error("PIHOLE_URL environment variable is required")
+        return 1
+    
+    logger.info(f"Starting DNS manager with Pi-hole at {pihole_url}")
+    logger.info(f"Using DNS label: {dns_label}")
+    if base_domain:
+        logger.info(f"Using base domain: {base_domain}")
+    if docker_host_ip:
+        logger.info(f"Using Docker host IP: {docker_host_ip}")
+    
+    dns_manager = PiHoleDNSManager(pihole_url, api_token)
+    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip)
+    
+    try:
+        monitor.monitor_events()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        return 1
+    
+    return 0
+
+if __name__ == '__main__':
+    exit(main())
