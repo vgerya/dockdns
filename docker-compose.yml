@@ -9,6 +9,8 @@ services:
       - PIHOLE_URL=${PIHOLE_URL:-http://pihole.local}
       - PIHOLE_API_TOKEN=${PIHOLE_API_TOKEN}
       - DNS_LABEL=${DNS_LABEL:-dns.hostname}
+      - BASE_DOMAIN=${BASE_DOMAIN:-}
+      - DOCKER_HOST_IP=${DOCKER_HOST_IP}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
