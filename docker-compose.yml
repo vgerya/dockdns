@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  docker-events-dns:
+  dockdns:
     build: .
-    container_name: docker-events-dns
+    container_name: dockdns
     restart: unless-stopped
     environment:
       - PIHOLE_URL=${PIHOLE_URL:-http://pihole.local}
@@ -16,12 +16,12 @@ services:
       - STATE_DIR=${STATE_DIR:-/shared-state}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Mount shared state directory to NAS path
-      # Example: /nas/docker-dns-state:/shared-state
+      # Mount shared state directory to NAS path  
+      # Example: /nas/dockdns-state:/shared-state
       - ${NAS_STATE_PATH:-./state}:/shared-state
     networks:
-      - docker-events-dns-network
+      - dockdns-network
 
 networks:
-  docker-events-dns-network:
+  dockdns-network:
     driver: bridge

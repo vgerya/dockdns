@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+DockDNS - Automatic DNS management for Docker containers with Pi-hole
+Monitors Docker events and automatically creates/removes DNS records in Pi-hole.
+"""
 
 import os
 import time
@@ -11,8 +15,8 @@ import hashlib
 import fcntl
 from typing import Optional, Dict, List, Set
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - DockDNS - %(levelname)s - %(message)s')
+logger = logging.getLogger('dockdns')
 
 class PiHoleDNSManager:
     def __init__(self, pihole_url: str, api_token: Optional[str] = None):
@@ -92,7 +96,7 @@ class DockerEventMonitor:
         self.instance_id = instance_id or self._generate_instance_id()
         self.env_prefix = env_prefix or self._generate_env_prefix()
         self.state_dir = state_dir
-        self.state_file = os.path.join(state_dir, 'docker-dns-shared-state.json')
+        self.state_file = os.path.join(state_dir, 'dockdns-shared-state.json')
         self.container_dns_records: Dict[str, tuple] = {}
         self._load_state()
         
@@ -353,19 +357,20 @@ def main():
         logger.error("PIHOLE_URL environment variable is required")
         return 1
     
-    logger.info(f"Starting DNS manager with Pi-hole at {pihole_url}")
-    logger.info(f"Using DNS label: {dns_label}")
-    logger.info(f"Using shared state directory: {state_dir}")
+    logger.info("🚀 Starting DockDNS - Automatic DNS for Docker containers")
+    logger.info(f"📡 Pi-hole server: {pihole_url}")
+    logger.info(f"🏷️  DNS label: {dns_label}")
+    logger.info(f"💾 Shared state directory: {state_dir}")
     if base_domain:
-        logger.info(f"Using base domain: {base_domain}")
+        logger.info(f"🌐 Base domain: {base_domain}")
     if docker_host_ip:
-        logger.info(f"Using Docker host IP: {docker_host_ip}")
+        logger.info(f"🖥️  Docker host IP: {docker_host_ip}")
     
     dns_manager = PiHoleDNSManager(pihole_url, api_token)
     monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id, state_dir, env_prefix)
     
-    logger.info(f"Service instance ID: {monitor.instance_id}")
-    logger.info(f"Environment prefix: {monitor.env_prefix}")
+    logger.info(f"🆔 Service instance ID: {monitor.instance_id}")
+    logger.info(f"🏢 Environment prefix: {monitor.env_prefix}")
     
     try:
         monitor.monitor_events()
