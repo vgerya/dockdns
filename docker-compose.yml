@@ -12,9 +12,12 @@ services:
       - BASE_DOMAIN=${BASE_DOMAIN:-}
       - DOCKER_HOST_IP=${DOCKER_HOST_IP}
       - INSTANCE_ID=${INSTANCE_ID}
+      - STATE_DIR=${STATE_DIR:-/shared-state}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./state:/tmp
+      # Mount shared state directory to NAS path
+      # Example: /nas/docker-dns-state:/shared-state
+      - ${NAS_STATE_PATH:-./state}:/shared-state
     networks:
       - docker-events-dns-network
 

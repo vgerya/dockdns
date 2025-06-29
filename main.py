@@ -8,6 +8,7 @@ import docker
 import socket
 import json
 import hashlib
+import fcntl
 from typing import Optional, Dict, List, Set
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -81,14 +82,15 @@ class PiHoleDNSManager:
 class DockerEventMonitor:
     def __init__(self, dns_manager: PiHoleDNSManager, dns_label: str = 'dns.hostname', 
                  base_domain: str = '', docker_host_ip: Optional[str] = None, 
-                 instance_id: Optional[str] = None):
+                 instance_id: Optional[str] = None, state_dir: str = '/shared-state'):
         self.client = docker.from_env()
         self.dns_manager = dns_manager
         self.dns_label = dns_label
         self.base_domain = base_domain
         self.docker_host_ip = docker_host_ip or self._get_docker_host_ip()
         self.instance_id = instance_id or self._generate_instance_id()
-        self.state_file = f"/tmp/docker-dns-{self.instance_id}.json"
+        self.state_dir = state_dir
+        self.state_file = os.path.join(state_dir, 'docker-dns-shared-state.json')
         self.container_dns_records: Dict[str, tuple] = {}
         self._load_state()
         
@@ -109,27 +111,64 @@ class DockerEventMonitor:
         except Exception:
             return '127.0.0.1'
     
-    def _load_state(self):
+    def _load_shared_state(self) -> Dict:
+        """Load the shared state file with file locking"""
         try:
-            if os.path.exists(self.state_file):
-                with open(self.state_file, 'r') as f:
-                    state = json.load(f)
-                    self.container_dns_records = {k: tuple(v) for k, v in state.get('records', {}).items()}
-                    logger.info(f"Loaded {len(self.container_dns_records)} DNS records from state")
+            os.makedirs(self.state_dir, exist_ok=True)
+            if not os.path.exists(self.state_file):
+                return {'instances': {}, 'last_updated': time.time()}
+                
+            with open(self.state_file, 'r') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                return json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load state from {self.state_file}: {e}")
+            logger.warning(f"Failed to load shared state from {self.state_file}: {e}")
+            return {'instances': {}, 'last_updated': time.time()}
+    
+    def _save_shared_state(self, shared_state: Dict):
+        """Save the shared state file with file locking"""
+        try:
+            os.makedirs(self.state_dir, exist_ok=True)
+            shared_state['last_updated'] = time.time()
+            
+            with open(self.state_file, 'w') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                json.dump(shared_state, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save shared state to {self.state_file}: {e}")
+    
+    def _load_state(self):
+        """Load this instance's records from shared state"""
+        try:
+            shared_state = self._load_shared_state()
+            instance_data = shared_state.get('instances', {}).get(self.instance_id, {})
+            
+            self.container_dns_records = {}
+            for container_id, record_data in instance_data.get('records', {}).items():
+                self.container_dns_records[container_id] = tuple(record_data)
+                
+            logger.info(f"Loaded {len(self.container_dns_records)} DNS records for instance {self.instance_id}")
+        except Exception as e:
+            logger.warning(f"Failed to load state for instance {self.instance_id}: {e}")
     
     def _save_state(self):
+        """Save this instance's records to shared state"""
         try:
-            state = {
-                'instance_id': self.instance_id,
+            shared_state = self._load_shared_state()
+            
+            if 'instances' not in shared_state:
+                shared_state['instances'] = {}
+            
+            shared_state['instances'][self.instance_id] = {
+                'hostname': socket.gethostname(),
+                'base_domain': self.base_domain,
+                'last_seen': time.time(),
                 'records': {k: list(v) for k, v in self.container_dns_records.items()}
             }
-            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            with open(self.state_file, 'w') as f:
-                json.dump(state, f, indent=2)
+            
+            self._save_shared_state(shared_state)
         except Exception as e:
-            logger.warning(f"Failed to save state to {self.state_file}: {e}")
+            logger.warning(f"Failed to save state for instance {self.instance_id}: {e}")
         
     def get_container_hostname(self, container) -> Optional[str]:
         labels = container.labels or {}
@@ -207,9 +246,45 @@ class DockerEventMonitor:
             if stale_records:
                 self._save_state()
                 logger.info(f"Cleaned up {len(stale_records)} stale DNS records")
+            
+            self._cleanup_inactive_instances()
                         
         except Exception as e:
             logger.error(f"Failed to cleanup stale DNS records: {e}")
+    
+    def _cleanup_inactive_instances(self):
+        """Remove DNS records from instances that haven't been seen for too long"""
+        try:
+            shared_state = self._load_shared_state()
+            current_time = time.time()
+            inactive_threshold = 300  # 5 minutes
+            
+            inactive_instances = []
+            for instance_id, instance_data in shared_state.get('instances', {}).items():
+                if instance_id == self.instance_id:
+                    continue
+                    
+                last_seen = instance_data.get('last_seen', 0)
+                if current_time - last_seen > inactive_threshold:
+                    inactive_instances.append(instance_id)
+            
+            if inactive_instances:
+                logger.info(f"Found {len(inactive_instances)} inactive instances, cleaning up their DNS records")
+                
+                for instance_id in inactive_instances:
+                    instance_data = shared_state['instances'][instance_id]
+                    for container_id, record_data in instance_data.get('records', {}).items():
+                        hostname, ip = record_data
+                        logger.info(f"Removing DNS record from inactive instance {instance_id}: {hostname} -> {ip}")
+                        self.dns_manager.remove_dns_record(hostname, ip)
+                    
+                    del shared_state['instances'][instance_id]
+                
+                self._save_shared_state(shared_state)
+                logger.info(f"Cleaned up {len(inactive_instances)} inactive instances")
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup inactive instances: {e}")
     
     def sync_existing_containers(self):
         logger.info("Syncing existing running containers...")
@@ -254,6 +329,7 @@ def main():
     base_domain = os.getenv('BASE_DOMAIN', '')
     docker_host_ip = os.getenv('DOCKER_HOST_IP')
     instance_id = os.getenv('INSTANCE_ID')
+    state_dir = os.getenv('STATE_DIR', '/shared-state')
     
     if not pihole_url:
         logger.error("PIHOLE_URL environment variable is required")
@@ -261,13 +337,14 @@ def main():
     
     logger.info(f"Starting DNS manager with Pi-hole at {pihole_url}")
     logger.info(f"Using DNS label: {dns_label}")
+    logger.info(f"Using shared state directory: {state_dir}")
     if base_domain:
         logger.info(f"Using base domain: {base_domain}")
     if docker_host_ip:
         logger.info(f"Using Docker host IP: {docker_host_ip}")
     
     dns_manager = PiHoleDNSManager(pihole_url, api_token)
-    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id)
+    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id, state_dir)
     
     logger.info(f"Service instance ID: {monitor.instance_id}")
     
