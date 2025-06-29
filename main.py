@@ -6,6 +6,8 @@ import logging
 import requests
 import docker
 import socket
+import json
+import hashlib
 from typing import Optional, Dict, List, Set
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -78,14 +80,24 @@ class PiHoleDNSManager:
 
 class DockerEventMonitor:
     def __init__(self, dns_manager: PiHoleDNSManager, dns_label: str = 'dns.hostname', 
-                 base_domain: str = '', docker_host_ip: Optional[str] = None):
+                 base_domain: str = '', docker_host_ip: Optional[str] = None, 
+                 instance_id: Optional[str] = None):
         self.client = docker.from_env()
         self.dns_manager = dns_manager
         self.dns_label = dns_label
         self.base_domain = base_domain
         self.docker_host_ip = docker_host_ip or self._get_docker_host_ip()
+        self.instance_id = instance_id or self._generate_instance_id()
+        self.state_file = f"/tmp/docker-dns-{self.instance_id}.json"
         self.container_dns_records: Dict[str, tuple] = {}
+        self._load_state()
         
+    def _generate_instance_id(self) -> str:
+        hostname = socket.gethostname()
+        docker_host = os.getenv('DOCKER_HOST', 'unix:///var/run/docker.sock')
+        unique_string = f"{hostname}-{docker_host}-{self.base_domain}"
+        return hashlib.md5(unique_string.encode()).hexdigest()[:8]
+    
     def _get_docker_host_ip(self) -> str:
         try:
             docker_host = os.getenv('DOCKER_HOST', 'unix:///var/run/docker.sock')
@@ -96,6 +108,28 @@ class DockerEventMonitor:
                 return socket.gethostbyname(socket.gethostname())
         except Exception:
             return '127.0.0.1'
+    
+    def _load_state(self):
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    state = json.load(f)
+                    self.container_dns_records = {k: tuple(v) for k, v in state.get('records', {}).items()}
+                    logger.info(f"Loaded {len(self.container_dns_records)} DNS records from state")
+        except Exception as e:
+            logger.warning(f"Failed to load state from {self.state_file}: {e}")
+    
+    def _save_state(self):
+        try:
+            state = {
+                'instance_id': self.instance_id,
+                'records': {k: list(v) for k, v in self.container_dns_records.items()}
+            }
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save state to {self.state_file}: {e}")
         
     def get_container_hostname(self, container) -> Optional[str]:
         labels = container.labels or {}
@@ -145,37 +179,34 @@ class DockerEventMonitor:
             
         if self.dns_manager.add_dns_record(hostname, ip):
             self.container_dns_records[container.id] = (hostname, ip)
+            self._save_state()
     
     def handle_container_stop(self, container_id: str):
         if container_id in self.container_dns_records:
             hostname, ip = self.container_dns_records[container_id]
             if self.dns_manager.remove_dns_record(hostname, ip):
                 del self.container_dns_records[container_id]
+                self._save_state()
     
     def cleanup_stale_dns_records(self):
-        logger.info("Cleaning up stale DNS records...")
+        logger.info(f"Cleaning up stale DNS records for instance {self.instance_id}...")
         try:
-            existing_records = self.dns_manager.get_dns_records()
             running_containers = self.client.containers.list(filters={'status': 'running'})
+            current_container_ids = {c.id for c in running_containers}
             
-            expected_hostnames = set()
-            for container in running_containers:
-                hostname = self.get_container_hostname(container)
-                if hostname:
-                    expected_hostnames.add(hostname)
+            stale_records = []
+            for container_id, (hostname, ip) in list(self.container_dns_records.items()):
+                if container_id not in current_container_ids:
+                    stale_records.append((container_id, hostname, ip))
             
-            for record in existing_records:
-                domain = record['domain']
-                ip = record['ip']
-                
-                if self.base_domain and domain.endswith(f".{self.base_domain}"):
-                    if domain not in expected_hostnames:
-                        logger.info(f"Removing stale DNS record: {domain} -> {ip}")
-                        self.dns_manager.remove_dns_record(domain, ip)
-                elif not self.base_domain and domain in [r[0] for r in self.container_dns_records.values()]:
-                    if domain not in expected_hostnames:
-                        logger.info(f"Removing stale DNS record: {domain} -> {ip}")
-                        self.dns_manager.remove_dns_record(domain, ip)
+            for container_id, hostname, ip in stale_records:
+                logger.info(f"Removing stale DNS record managed by this instance: {hostname} -> {ip}")
+                if self.dns_manager.remove_dns_record(hostname, ip):
+                    del self.container_dns_records[container_id]
+            
+            if stale_records:
+                self._save_state()
+                logger.info(f"Cleaned up {len(stale_records)} stale DNS records")
                         
         except Exception as e:
             logger.error(f"Failed to cleanup stale DNS records: {e}")
@@ -222,6 +253,7 @@ def main():
     dns_label = os.getenv('DNS_LABEL', 'dns.hostname')
     base_domain = os.getenv('BASE_DOMAIN', '')
     docker_host_ip = os.getenv('DOCKER_HOST_IP')
+    instance_id = os.getenv('INSTANCE_ID')
     
     if not pihole_url:
         logger.error("PIHOLE_URL environment variable is required")
@@ -235,7 +267,9 @@ def main():
         logger.info(f"Using Docker host IP: {docker_host_ip}")
     
     dns_manager = PiHoleDNSManager(pihole_url, api_token)
-    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip)
+    monitor = DockerEventMonitor(dns_manager, dns_label, base_domain, docker_host_ip, instance_id)
+    
+    logger.info(f"Service instance ID: {monitor.instance_id}")
     
     try:
         monitor.monitor_events()

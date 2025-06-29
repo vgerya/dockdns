@@ -11,8 +11,10 @@ services:
       - DNS_LABEL=${DNS_LABEL:-dns.hostname}
       - BASE_DOMAIN=${BASE_DOMAIN:-}
       - DOCKER_HOST_IP=${DOCKER_HOST_IP}
+      - INSTANCE_ID=${INSTANCE_ID}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./state:/tmp
     networks:
       - docker-events-dns-network
 
