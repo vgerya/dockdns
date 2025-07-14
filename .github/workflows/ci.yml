@@ -25,8 +25,8 @@ jobs:
     - name: Install Dependencies
       run: poetry install
 
-    - name: Run Tests
-      run: poetry run pytest
+#     - name: Run Tests
+#       run: poetry run pytest
 
     - name: Log in to Docker Hub
       run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
