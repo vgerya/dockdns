@@ -1,0 +1,10 @@
+{
+    "secrets": {
+        "DOCKERHUB_USERNAME": {
+            "description": "Username of Docker.io"
+        },
+        "DOCKERHUB_TOKEN": {
+            "description": "Token of Docker.io"
+        }
+    }
+}
