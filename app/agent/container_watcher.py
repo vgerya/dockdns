@@ -58,7 +58,7 @@ class DockerWatcher:
 
     def __init__(self, dock_dn_config: DockDNSConfig):
         self.dock_dn_config = dock_dn_config
-        self.__client: DockerClient = docker.DockerClient(base_url="unix:///var/run/docker.sock")
+        self.__client: DockerClient = docker.DockerClient(base_url=dock_dn_config.docker_url)
         self.__thread = None
 
     def start(self):
@@ -93,3 +93,4 @@ class DockerWatcher:
         self.__running = False
         self.__thread.join()
         self.__thread = None
+        print("[STOP] Docker watcher stopped.")

@@ -57,5 +57,6 @@ class ContainerWrapper:
     def __str__(self):
         return (
             f"Container(name={self.name}, id={self.id}, image={self.__container.image}, "
-            f"hostname={self.target_hostname}, disabled={self.disabled}, labels={self.labels_dict})"
+            f"disabled={self.disabled}, target_hostname={self.target_hostname}, "
+            f"source_port={self.source_port}, source_ip={self.source_ip})"
         )
