@@ -7,8 +7,8 @@ class DockDNSConfig(BaseSettings):
     base_domain: str = 'docker'
     dry_run: bool = False
 
-    traefik_output_dir = "/mnt/traefik-dynamic"
-    traefik_template_path = "templates/traefik_router.tmpl"
+    traefik_output_dir: str = "/mnt/traefik-dynamic"
+    traefik_template_path: str = "templates/traefik_router.tmpl"
 
     notifications_enabled: bool = True
     telegram_token: Optional[str] = None
