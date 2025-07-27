@@ -31,8 +31,21 @@ jobs:
     - name: Log in to Docker Hub
       run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-    - name: Build Docker Image
-      run: docker build -t vgerya/dockdns:latest .
+#     - name: Build Docker Image
+#       run: docker build --tag vgerya/dockdns:latest --tag vgerya/dockdns:$(date +%Y%m%dT%H%M%S) .
+#
+#     - name: Push Docker Image
+#       run: docker push vgerya/dockdns:latest
 
-    - name: Push Docker Image
-      run: docker push vgerya/dockdns:latest
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and Push Multi-Arch Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          vgerya/dockdns:latest
+          vgerya/dockdns:${{ github.run_id }}
+        platforms: linux/amd64,linux/arm64
