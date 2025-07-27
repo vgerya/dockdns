@@ -1,104 +1,95 @@
 import threading
 
 import docker
-import os
 import time
-import requests
-from jinja2 import Template
+from docker import DockerClient
 
-HOST_LABEL = os.environ.get("HOST_LABEL", "unknown-host")
-TRAEFIK_OUTPUT_DIR = os.environ.get("TRAEFIK_OUTPUT_DIR", "/mnt/traefik-dynamic")
-TRAEFIK_TEMPLATE_PATH = os.environ.get("TRAEFIK_TEMPLATE_PATH", "templates/traefik_router.tmpl")
-DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+from agent.dockdns_config import DockDNSConfig
+from dns.manager.pihole.pihole_client import DNSRecord
+from domain.container_wraper import ContainerWrapper
 
-def send_telegram(message):
-    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        try:
-            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-        except Exception as e:
-            print(f"[WARN] Telegram failed: {e}")
 
-def yaml_path(hostname, container):
-    return f"{TRAEFIK_OUTPUT_DIR}/{hostname}_{container.id[:12]}.yaml"
+def get_dns_record(wrapper: ContainerWrapper) -> DNSRecord:
+    """
+    Extracts the DNS record from the container wrapper.
+    """
+    hostname = wrapper.target_hostname
+    source_ip = wrapper.source_ip
+    source_port = wrapper.source_port
 
-def render_traefik_config(hostname, ip, port, container):
-    with open(TRAEFIK_TEMPLATE_PATH) as f:
-        template = Template(f.read())
-    rendered = template.render(hostname=hostname, ip=ip, port=port)
-    output_path = yaml_path(hostname, container)
-    if DRY_RUN:
-        print(f"[DRY RUN] Would write {output_path}:{rendered}")
-    else:
-        with open(output_path, "w") as f:
-            f.write(rendered)
-        print(f"[TRAEFIK] Wrote config to {output_path}")
-        send_telegram(f"[Traefik] \U0001F195 Added route: {hostname} → {ip}:{port}")
+    if not hostname or not source_ip or not source_port:
+        raise ValueError(f"Invalid DNS record for {wrapper}")
 
-def delete_traefik_config(container):
-    hostname = container.labels.get("dns.home.box")
-    if not hostname:
-        return
-    path = yaml_path(hostname, container)
-    if os.path.exists(path):
-        if DRY_RUN:
-            print(f"[DRY RUN] Would delete {path}")
-        else:
-            os.remove(path)
-            print(f"[TRAEFIK] Removed config: {path}")
-            send_telegram(f"[Traefik] ❌ Removed route: {hostname}")
+    return DNSRecord(hostname, source_ip, source_port)
 
-def process_container(container):
-    labels = container.labels
-    hostname = labels.get("dockdns.target.hostname")
-    port = labels.get("dns.target.port")
 
-    # TODO form  hostname
-    hostname = f"{hostname:{container.name}}.{HOST_LABEL}"
+def process_container(wrapper: ContainerWrapper, config: DockDNSConfig):
+    dns_record = get_dns_record(wrapper)
 
-    if not hostname or not port:
-        return
+    if config.dry_run:
+        print(f"[DRY RUN] Would process container {wrapper} with DNS record {dns_record}")
+        # return
 
-    ip = None
-    try:
-        ip = container.attrs["NetworkSettings"]["IPAddress"]
-        if not ip and container.attrs["HostConfig"]["NetworkMode"] == "host":
-            ip = os.popen("hostname -I").read().split()[0]
-    except Exception as e:
-        print(f"[WARN] Can't get IP for {hostname}: {e}")
-        return
+    # render_traefik_config(wrapper, dns_record)
 
-    print(f"[INFO] Register {hostname} → {ip}:{port}")
-    render_traefik_config(hostname, ip, port, container)
 
-def init_existing_containers(client):
+def init_existing_containers(client: DockerClient, config: DockDNSConfig):
     print("[INIT] Checking existing containers...")
     for container in client.containers.list(filters={"status": "running"}):
-        labels = container.labels
-        if "dns.home.box" in labels and "dns.target_port" in labels:
-            process_container(container)
-
-def watch_docker_events():
-    client = docker.DockerClient(base_url="unix:///var/run/docker.sock")
-    init_existing_containers(client)
-    print("[START] Agent watching Docker events...")
-    while True:
-        try:
-            for event in client.events(decode=True):
-                if event.get("Type") == "container":
-                    action = event.get("Action")
-                    container = client.containers.get(event["id"])
-                    if action == "start":
-                        process_container(container)
-                    elif action in ["die", "stop", "destroy"]:
-                        delete_traefik_config(container)
-        except Exception as e:
-            print(f"[ERROR] Main loop failed: {e}")
-            time.sleep(5)
+        wrapper = ContainerWrapper(container.labels)
+        if wrapper.disabled:
+            print(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
+            continue
+        process_container(wrapper, config)
 
 
-def start_docker_watcher():
-    thread = threading.Thread(target=watch_docker_events, daemon=True)
-    thread.start()
+def destroy_container(wrapper: ContainerWrapper, config: DockDNSConfig):
+    dns_record = get_dns_record(wrapper)
+
+    if config.dry_run:
+        print(f"[DRY RUN] Would destroy container {wrapper} with DNS record {dns_record}")
+        # return
+
+    # delete_traefik_config(wrapper)
+
+
+class DockerWatcher:
+    __running = True
+
+    def __init__(self, dock_dn_config: DockDNSConfig):
+        self.dock_dn_config = dock_dn_config
+        self.__client: DockerClient = docker.DockerClient(base_url="unix:///var/run/docker.sock")
+        self.__thread = None
+
+    def start(self):
+        if self.__thread:
+            print("[ERROR] Docker watcher is already running.")
+            return
+        self.__thread = threading.Thread(name="DockerWatcher", target=self.__watch_docker_events, daemon=True)
+        self.__thread.start()
+
+    def __watch_docker_events(self):
+        init_existing_containers(self.__client, self.dock_dn_config)
+        print("[START] Agent watching Docker events...")
+        while self.__running:
+            try:
+                for event in self.__client.events(decode=True):
+                    if event.get("Type") == "container":
+                        action = event.get("Action")
+                        container = self.__client.containers.get(event["id"])
+                        wrapper = ContainerWrapper(container)
+                        if action == "start":
+                            process_container(wrapper, self.dock_dn_config)
+                        elif action in ["die", "stop", "destroy"]:
+                            destroy_container(wrapper, self.dock_dn_config)
+
+                time.sleep(0.5)  # Polling interval
+            except Exception as e:
+                print(f"[ERROR] Main loop failed: {e}")
+                time.sleep(5)
+
+    def stop(self):
+        print("[STOP] Stopping Docker watcher...")
+        self.__running = False
+        self.__thread.join()
+        self.__thread = None
