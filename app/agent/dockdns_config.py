@@ -1,6 +1,7 @@
 from typing import Optional
 
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
+
 
 class DockDNSConfig(BaseSettings):
     base_domain: str = 'docker'
