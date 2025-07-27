@@ -5,6 +5,7 @@ ENV POETRY_VERSION=1.8.2
 RUN pip install "poetry==$POETRY_VERSION"
 
 # Set working directory
+ENV PYTHONPATH=app
 WORKDIR /app
 
 # Copy only required files first (for caching)
