@@ -1,3 +1,4 @@
+import logging
 import threading
 
 import docker
@@ -7,6 +8,8 @@ from docker import DockerClient
 from agent.dockdns_config import DockDNSConfig
 from dns.manager.pihole.pihole_client import DNSRecord
 from domain.container_wraper import ContainerWrapper
+
+logger = logging.getLogger('dockdns.main')
 
 
 def get_dns_record(wrapper: ContainerWrapper, config: DockDNSConfig,) -> DNSRecord:
@@ -75,7 +78,7 @@ class DockerWatcher:
 
     def __watch_docker_events(self):
         init_existing_containers(self.__client, self.dock_dn_config)
-        print("[START] Agent watching Docker events...")
+        logger.info(f"[START] Agent watching Docker events, config={self.dock_dn_config}...")
         while self.__running:
             try:
                 for event in self.__client.events(decode=True):
@@ -90,9 +93,9 @@ class DockerWatcher:
 
                 time.sleep(0.5)  # Polling interval
             except Exception as e:
-                print(f"[ERROR] Main loop failed: {e}")
+                logger.error(f"[ERROR] Main loop failed: {e}", exc_info=True)
                 time.sleep(5)
-        print("[STOP] Docker watcher main loop exited.")
+        logger.info("[STOP] Agent stopped watching Docker events.")
 
     def stop(self):
         print("[STOP] Stopping Docker watcher...")

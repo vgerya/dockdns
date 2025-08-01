@@ -7,6 +7,8 @@ from agent.container_watcher import DockerWatcher
 from agent.dockdns_config import DockDNSConfig
 from app.api.v1.endpoints import router as v1_router
 
+logger = logging.getLogger('dockdns.main')
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -14,7 +16,7 @@ async def lifespan(app: FastAPI):
 
     dns_config = DockDNSConfig()
 
-    print(f"[FASTAPI] Starting background Docker watcher with configs {dns_config}...")
+    logger.info(f"[FASTAPI] Starting background Docker watcher with configs {dns_config}...")
     docker_watcher = DockerWatcher(dns_config)
     docker_watcher.start()
 
