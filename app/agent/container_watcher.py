@@ -9,12 +9,14 @@ from dns.manager.pihole.pihole_client import DNSRecord
 from domain.container_wraper import ContainerWrapper
 
 
-def get_dns_record(wrapper: ContainerWrapper) -> DNSRecord:
+def get_dns_record(wrapper: ContainerWrapper, config: DockDNSConfig,) -> DNSRecord:
     """
     Extracts the DNS record from the container wrapper.
     """
     hostname = wrapper.target_hostname
-    source_ip = wrapper.source_ip
+    source_ip = config.dns_ip or wrapper.source_ip
+    if not source_ip:
+        raise ValueError(f"Container {wrapper} does not have a valid source IP.")
     source_port = wrapper.source_port
 
     if not hostname or not source_ip or not source_port:
@@ -23,8 +25,8 @@ def get_dns_record(wrapper: ContainerWrapper) -> DNSRecord:
     return DNSRecord(hostname, source_ip, source_port)
 
 
-def process_container(wrapper: ContainerWrapper, config: DockDNSConfig):
-    dns_record = get_dns_record(wrapper)
+def process_container(wrapper: ContainerWrapper, config: DockDNSConfig,):
+    dns_record = get_dns_record(wrapper, config)
 
     if config.dry_run:
         print(f"[DRY RUN] Would process container {wrapper} with DNS record {dns_record}")
@@ -36,15 +38,18 @@ def process_container(wrapper: ContainerWrapper, config: DockDNSConfig):
 def init_existing_containers(client: DockerClient, config: DockDNSConfig):
     print("[INIT] Checking existing containers...")
     for container in client.containers.list(filters={"status": "running"}):
-        wrapper = ContainerWrapper(container.labels)
-        if wrapper.disabled:
-            print(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
-            continue
-        process_container(wrapper, config)
+        try:
+            wrapper = ContainerWrapper(container.labels)
+            if wrapper.disabled:
+                print(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
+                continue
+            process_container(wrapper, config)
+        except Exception as e:
+            print(f"[INIT] Error processing container {container.id}: {e}")
 
 
 def destroy_container(wrapper: ContainerWrapper, config: DockDNSConfig):
-    dns_record = get_dns_record(wrapper)
+    dns_record = get_dns_record(wrapper, config)
 
     if config.dry_run:
         print(f"[DRY RUN] Would destroy container {wrapper} with DNS record {dns_record}")
@@ -58,14 +63,14 @@ class DockerWatcher:
 
     def __init__(self, dock_dn_config: DockDNSConfig):
         self.dock_dn_config = dock_dn_config
-        self.__client: DockerClient = docker.DockerClient(base_url=dock_dn_config.docker_url)
+        self.__client: DockerClient = docker.DockerClient(base_url=dock_dn_config.docker_url, timeout=0.5,)
         self.__thread = None
 
     def start(self):
         if self.__thread:
             print("[ERROR] Docker watcher is already running.")
             return
-        self.__thread = threading.Thread(name="DockerWatcher", target=self.__watch_docker_events, daemon=True)
+        self.__thread = threading.Thread(name="DockerWatcherThread", target=self.__watch_docker_events, daemon=True,)
         self.__thread.start()
 
     def __watch_docker_events(self):
@@ -87,6 +92,7 @@ class DockerWatcher:
             except Exception as e:
                 print(f"[ERROR] Main loop failed: {e}")
                 time.sleep(5)
+        print("[STOP] Docker watcher main loop exited.")
 
     def stop(self):
         print("[STOP] Stopping Docker watcher...")

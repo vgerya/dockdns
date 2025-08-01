@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 class DockDNSConfig(BaseSettings):
     base_domain: str = 'docker'
     dry_run: bool = False
+    dns_ip: Optional[str] = None
 
     docker_url: str = "unix:///var/run/docker.sock"
 

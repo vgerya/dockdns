@@ -50,6 +50,12 @@ class ContainerWrapper:
             if not ip and self.__container.attrs["HostConfig"]["NetworkMode"] == "host":
                 ip = os.popen("hostname -I").read().split()[0]
 
+            import socket
+
+            host_ip = socket.gethostbyname("host.docker.internal")
+
+            print(host_ip)
+
             return ip.strip() if ip else None
         except Exception:
             return None
