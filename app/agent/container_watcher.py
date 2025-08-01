@@ -32,30 +32,30 @@ def process_container(wrapper: ContainerWrapper, config: DockDNSConfig,):
     dns_record = get_dns_record(wrapper, config)
 
     if config.dry_run:
-        print(f"[DRY RUN] Would process container {wrapper} with DNS record {dns_record}")
+        logger.info(f"[DRY RUN] Would process container {wrapper} with DNS record {dns_record}")
         # return
 
     # render_traefik_config(wrapper, dns_record)
 
 
 def init_existing_containers(client: DockerClient, config: DockDNSConfig):
-    print("[INIT] Checking existing containers...")
+    logger.info("[INIT] Checking existing containers...")
     for container in client.containers.list(filters={"status": "running"}):
         try:
             wrapper = ContainerWrapper(container.labels)
             if wrapper.disabled:
-                print(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
+                logger.info(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
                 continue
             process_container(wrapper, config)
         except Exception as e:
-            print(f"[INIT] Error processing container {container.id}: {e}")
+            logger.error(f"[INIT] Error processing container {container.id}: {e}")
 
 
 def destroy_container(wrapper: ContainerWrapper, config: DockDNSConfig):
     dns_record = get_dns_record(wrapper, config)
 
     if config.dry_run:
-        print(f"[DRY RUN] Would destroy container {wrapper} with DNS record {dns_record}")
+        logger.info(f"[DRY RUN] Would destroy container {wrapper} with DNS record {dns_record}")
         # return
 
     # delete_traefik_config(wrapper)
@@ -71,7 +71,7 @@ class DockerWatcher:
 
     def start(self):
         if self.__thread:
-            print("[ERROR] Docker watcher is already running.")
+            logger.error("[ERROR] Docker watcher is already running.")
             return
         self.__thread = threading.Thread(name="DockerWatcherThread", target=self.__watch_docker_events, daemon=True,)
         self.__thread.start()
@@ -98,8 +98,8 @@ class DockerWatcher:
         logger.info("[STOP] Agent stopped watching Docker events.")
 
     def stop(self):
-        print("[STOP] Stopping Docker watcher...")
+        logger.info("[STOP] Stopping Docker watcher...")
         self.__running = False
         self.__thread.join()
         self.__thread = None
-        print("[STOP] Docker watcher stopped.")
+        logger.info("[STOP] Docker watcher stopped.")

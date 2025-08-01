@@ -1,6 +1,9 @@
 import requests
+import logging
 
 from agent.dockdns_config import DockDNSConfig
+
+logger = logging.getLogger('dockdns.notifier.telegram')
 
 
 def send_telegram(dock_dn_config: DockDNSConfig, message: str):
@@ -9,4 +12,4 @@ def send_telegram(dock_dn_config: DockDNSConfig, message: str):
         try:
             requests.post(url, data={"chat_id": dock_dn_config.telegram_chat_id, "text": message})
         except Exception as e:
-            print(f"[WARN] Telegram failed: {e}", exc_info=True)
+            logger.warning(f"[WARN] Telegram failed: {e}", exc_info=True)
