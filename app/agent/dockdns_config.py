@@ -18,5 +18,5 @@ class DockDNSConfig(BaseSettings):
     telegram_chat_id: Optional[str] = None
 
     class Config:
-        env_prefix = "DOCKDNS_"
-        env_file = ".env"
+        _env_prefix = "DOCKDNS_"
+        _env_file = ".env"
