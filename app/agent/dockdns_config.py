@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DockDNSConfig(BaseSettings):
@@ -17,6 +17,7 @@ class DockDNSConfig(BaseSettings):
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
-    class Config:
-        _env_prefix = "DOCKDNS_"
-        _env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_prefix="DOCKDNS_",
+        env_file=".env",
+    )
