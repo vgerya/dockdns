@@ -1,46 +1,67 @@
-import os
-from dataclasses import dataclass
 import logging
+import os
+from datetime import datetime
 
 from jinja2 import Template
 
 from agent.dockdns_config import DockDNSConfig
+from dns.manager.pihole.pihole_client import DNSRecord
 from domain.container_wraper import ContainerWrapper
 
-
-@dataclass
-class TraefikConfig:
-    template_path: str
-    output_dir: str
-    dry_run: bool
+logger = logging.getLogger('dns.manager.traefik_client')
 
 
-def yaml_path(container: ContainerWrapper, config: TraefikConfig, ):
-    return f"{config.output_dir}/{container.target_hostname}_{container.id[:12]}.yaml"
+def yaml_path(container: ContainerWrapper, config: DockDNSConfig, ):
+    return f"{config.traefik_output_dir}/{container.labeled_hostname}_{container.id[:12]}.yaml"
 
 
-def render_traefik_config(hostname, ip, port, container, config: TraefikConfig, dockdns_config: DockDNSConfig):
-    logger = logging.getLogger('dns.manager.traefik_client')
-    with open(config.template_path) as f:
+def create_traefik_config(
+        dns_record: DNSRecord,
+        dockdns_config: DockDNSConfig,
+) -> str:
+    with open(dockdns_config.traefik_templates_path) as f:
         template = Template(f.read())
-    rendered = template.render(hostname=hostname, ip=ip, port=port)
-    output_path = yaml_path(container, config)
+
+        target_hostname = (
+                dns_record.hostname +
+                ("." if not dockdns_config.base_domain.startswith(".") else "") +
+                dockdns_config.base_domain
+        )
+
+        return template.render(
+            hostname=target_hostname,
+            ip=dns_record.ip,
+            port=dns_record.port,
+            timestamp=datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3],
+        )
+
+def render_traefik_config(
+    container: ContainerWrapper,
+    dns_record: DNSRecord,
+    dockdns_config: DockDNSConfig,
+):
+    rendered = create_traefik_config(dns_record, dockdns_config)
+
+    output_path = yaml_path(container,dockdns_config,)
+
     if dockdns_config.dry_run:
         logger.info(f"[DRY RUN] Would write {output_path}:{rendered}")
-    else:
-        with open(output_path, "w") as f:
-            f.write(rendered)
-        logger.info(f"[TRAEFIK] Wrote config to {output_path}")
-        # send_telegram(f"[Traefik] \U0001F195 Added route: {hostname} → {ip}:{port}")
+        return
+
+    with open(output_path, "w") as f:
+        f.write(rendered)
+
+    logger.info(f"[TRAEFIK] Wrote config to {output_path}")
+    # send_telegram(f"[Traefik] \U0001F195 Added route: {hostname} → {ip}:{port}")
 
 
-def delete_traefik_config(container: ContainerWrapper, config: TraefikConfig, dockdns_config: DockDNSConfig,):
-    logger = logging.getLogger('dns.manager.traefik_client')
-    path = yaml_path(container, config, )
+def delete_traefik_config(container: ContainerWrapper, dockdns_config: DockDNSConfig, ):
+    path = yaml_path(container, dockdns_config, )
     if os.path.exists(path):
         if dockdns_config.dry_run:
             logger.info(f"[DRY RUN] Would delete {path}")
-        else:
-            os.remove(path)
-            logger.info(f"[TRAEFIK] Removed config: {path}")
-            # send_telegram(f"[Traefik] ❌ Removed route: {hostname}")
+            return
+
+        os.remove(path)
+        logger.info(f"[TRAEFIK] Removed config: {path}")
+        # send_telegram(f"[Traefik] ❌ Removed route: {hostname}")

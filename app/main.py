@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     dns_config = DockDNSConfig()
 
     logger.info(f"[FASTAPI] Starting background Docker watcher with configs {dns_config}...")
-    docker_watcher = DockerWatcher(dns_config)
+    docker_watcher = DockerWatcher(dock_dn_config=dns_config,)
     docker_watcher.start()
 
     yield

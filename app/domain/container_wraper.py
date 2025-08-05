@@ -1,4 +1,4 @@
-import os
+import inspect
 from enum import Enum
 from typing import Optional
 
@@ -7,6 +7,7 @@ class ContainerLabelOptions(Enum):
     DISABLED = "dockdns.disabled"
     HOSTNAME = "dockdns.target.hostname"
     PORT = "dockdns.source.port"
+
 
 class ContainerWrapper:
     def __init__(self, container):
@@ -33,37 +34,25 @@ class ContainerWrapper:
         return self.labels_dict.get(ContainerLabelOptions.DISABLED.value, "false").lower() == "true"
 
     @property
-    def target_hostname(self) -> str:
-        return self.labels_dict.get(ContainerLabelOptions.HOSTNAME.value) or self.name
+    def labeled_hostname(self) -> str:
+        return self.labels_dict.get(ContainerLabelOptions.HOSTNAME.value)
 
     @property
-    def source_port(self) -> int:
-        return (self.labels_dict.get(ContainerLabelOptions.PORT.value)
-                or next(iter(self.__container.attrs.get("Config", {}).get("ExposedPorts", {})), None)
-                or 80
-                )
+    def labeled_port(self) -> Optional[str]:
+        return self.labels_dict.get(ContainerLabelOptions.PORT.value)
 
     @property
-    def source_ip(self) -> Optional[str]:
-        try:
-            ip = self.__container.attrs["NetworkSettings"]["IPAddress"]
-            if not ip and self.__container.attrs["HostConfig"]["NetworkMode"] == "host":
-                ip = os.popen("hostname -I").read().split()[0]
+    def exposed_ports(self) -> list[str]:
+        return self.__container.attrs.get("Config", {}).get("ExposedPorts", [])
 
-            import socket
-            host_ip = socket.gethostbyname("host.docker.internal")
+    @property
+    def network_settings_ip_address(self) -> Optional[str]:
+        return self.__container.attrs.get("NetworkSettings", {}).get("IPAddress")
 
-            import logging
-            logger = logging.getLogger('dockdns.main')
-            logger.info(f"host.docker.internal IP: {host_ip}")
-
-            return ip.strip() if ip else None
-        except Exception:
-            return None
+    def is_network_host_mode(self):
+        return self.__container.attrs.get("HostConfig", {}).get("NetworkMode") == "host"
 
     def __str__(self):
-        return (
-            f"Container(name={self.name}, id={self.id}, image={self.__container.image}, "
-            f"disabled={self.disabled}, target_hostname={self.target_hostname}, "
-            f"source_port={self.source_port}, source_ip={self.source_ip})"
-        )
+        members = inspect.getmembers(self.__class__, lambda x: isinstance(x, property))
+        properties = [f"{name}={getattr(self, name)}" for name, _ in members]
+        return f"ContainerWrapper({', '.join(properties)})"

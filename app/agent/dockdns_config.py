@@ -10,8 +10,8 @@ class DockDNSConfig(BaseSettings):
 
     docker_url: str = "unix:///var/run/docker.sock"
 
-    traefik_output_dir: str = "/mnt/traefik-dynamic"
-    traefik_template_path: str = "templates/traefik_router.tmpl"
+    traefik_templates_path: str = "app/templates/traefik_router.tmpl"
+    traefik_output_dir: str = "/mnt/traefik-dynamic-config"
 
     notifications_enabled: bool = True
     telegram_token: Optional[str] = None

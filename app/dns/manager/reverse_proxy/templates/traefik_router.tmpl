@@ -1,0 +1,15 @@
+# Traefik HTTP configuration generated at {{ timestamp }}
+http:
+  # Router configuration section - defines how incoming requests should be handled
+  routers:
+    {{ hostname }}-router:
+      # Host rule matches requests based on the domain name
+      rule: "Host(`{{ hostname }}`)"
+      service: {{ hostname }}-service
+  # Services section - defines how to reach the actual services
+  services:
+    {{ hostname }}-service:
+      # Load balancer configuration for distributing traffic to backend servers
+      loadBalancer:
+        servers:
+          - url: "http://{{ ip }}:{{ port }}"
