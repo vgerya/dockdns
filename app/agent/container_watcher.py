@@ -8,7 +8,7 @@ from docker import DockerClient
 from agent.dockdns_config import DockDNSConfig
 from dns.manager.pihole.pihole_client import DNSRecord
 from dns.manager.reverse_proxy.traefik_client import render_traefik_config
-from domain.container_wraper import ContainerWrapper
+from domain.container_wraper import ContainerWrapper, ContainerLabelOptions
 from utils import os_utils
 
 logger = logging.getLogger('dockdns.main')
@@ -31,7 +31,7 @@ def get_dns_record(wrapper: ContainerWrapper, config: DockDNSConfig, ) -> DNSRec
     if not source_port:
         raise ValueError(
             f"Container {wrapper} does not have a valid source port. "
-            f"Port must be defined either in exposed ports or via 'dockdns.source.port' label.",
+            f"Port must be defined either in exposed ports or via '{ContainerLabelOptions.PORT}' label.",
         )
 
     hostname = wrapper.labeled_hostname or wrapper.name
