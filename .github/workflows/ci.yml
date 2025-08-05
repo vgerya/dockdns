@@ -52,9 +52,8 @@ jobs:
         images: vgerya/dockdns
         tags: |
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          type=raw,value=${{ github.run_number }},enable=${{ github.ref == 'refs/heads/main' }}
           type=raw,value=${{ env.BRANCH_NAME }}-latest,enable=${{ github.ref != 'refs/heads/main' }}
-          type=raw,value=${{ env.BRANCH_NAME }}-${{ github.sha }}-${{ github.run_number }}
-          type=raw,value=${{ env.BRANCH_NAME }}-${{ env.BUILD_TS }}
 
     - name: Build and Push Multi-Arch Image
       uses: docker/build-push-action@v5
