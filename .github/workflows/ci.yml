@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -33,19 +33,33 @@ jobs:
 
 #     - name: Build Docker Image
 #       run: docker build --tag vgerya/dockdns:latest --tag vgerya/dockdns:$(date +%Y%m%dT%H%M%S) .
-#
-#     - name: Push Docker Image
-#       run: docker push vgerya/dockdns:latest
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
+    - name: Extract branch name
+      shell: bash
+      run: echo "BRANCH_NAME=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | tr '/' '_')" >> $GITHUB_ENV
+
+    - name: Get Timestamp
+      shell: bash
+      run: echo "BUILD_TS=$(date +%Y%m%dT%H%M%S)" >> $GITHUB_ENV
+
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: vgerya/dockdns
+        tags: |
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          type=raw,value=${{ env.BRANCH_NAME }}-latest,enable=${{ github.ref != 'refs/heads/main' }}
+          type=raw,value=${{ env.BRANCH_NAME }}-${{ github.sha }}-${{ github.run_number }}
+          type=raw,value=${{ env.BRANCH_NAME }}-${{ env.BUILD_TS }}
 
     - name: Build and Push Multi-Arch Image
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
-        tags: |
-          vgerya/dockdns:latest
-          vgerya/dockdns:${{ github.run_id }}
+        tags: ${{ steps.meta.outputs.tags }}
         platforms: linux/amd64,linux/arm64
