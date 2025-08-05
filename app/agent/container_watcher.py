@@ -27,7 +27,7 @@ def get_dns_record(wrapper: ContainerWrapper, config: DockDNSConfig, ) -> DNSRec
     if not source_ip:
         raise ValueError(f"Container {wrapper} does not have a valid source IP.")
 
-    source_port = wrapper.labeled_port or wrapper.exposed_ports[0] if wrapper.exposed_ports else None
+    source_port = wrapper.labeled_port or (wrapper.exposed_ports[0] if wrapper.exposed_ports else None)
     if not source_port:
         raise ValueError(
             f"Container {wrapper} does not have a valid source port. "

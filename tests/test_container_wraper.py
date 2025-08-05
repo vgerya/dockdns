@@ -89,6 +89,22 @@ def test_exposed_ports_property_empty():
     assert wrapper.exposed_ports == [], "Expected exposed_ports to be an empty list when no ports are exposed."
 
 
+def test_exposed_ports_property_none():
+    """
+    Test the behavior of the exposed_ports property when ExposedPorts is set to None.
+    """
+    mock_container = MagicMock()
+    mock_container.attrs = {"Config": {"ExposedPorts": None}}
+    wrapper = ContainerWrapper(mock_container)
+
+    assert wrapper.exposed_ports == [], (
+        "Expected exposed_ports to return an empty list when 'ExposedPorts' is None."
+    )
+    assert wrapper.exposed_ports[0] if wrapper.exposed_ports else True, (
+        "Expected first exposed port to be None when 'ExposedPorts' is None."
+    )
+
+
 def test_network_settings_ip_address_property():
     mock_container = MagicMock()
     mock_container.attrs = {"NetworkSettings": {"IPAddress": "192.168.1.1"}}

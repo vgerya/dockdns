@@ -43,7 +43,7 @@ class ContainerWrapper:
 
     @property
     def exposed_ports(self) -> list[str]:
-        return self.__container.attrs.get("Config", {}).get("ExposedPorts", [])
+        return self.__container.attrs.get("Config", {}).get("ExposedPorts", []) or []
 
     @property
     def network_settings_ip_address(self) -> Optional[str]:
