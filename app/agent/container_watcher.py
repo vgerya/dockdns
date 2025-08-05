@@ -29,7 +29,10 @@ def get_dns_record(wrapper: ContainerWrapper, config: DockDNSConfig, ) -> DNSRec
 
     source_port = wrapper.labeled_port or wrapper.exposed_ports[0] if wrapper.exposed_ports else None
     if not source_port:
-        raise ValueError(f"Container {wrapper} does not have a valid source port.")
+        raise ValueError(
+            f"Container {wrapper} does not have a valid source port. "
+            f"Port must be defined either in exposed ports or via 'dockdns.source.port' label.",
+        )
 
     hostname = wrapper.labeled_hostname or wrapper.name
 
@@ -69,7 +72,7 @@ def init_existing_containers(client: DockerClient, config: DockDNSConfig,):
                 config=config,
             )
         except Exception as e:
-            logger.error(f"[INIT] Error processing container {container.id}: {e}")
+            logger.error(f"[INIT] Error processing container {container.id}: {e}", exc_info=True)
 
 
 def destroy_container(wrapper: ContainerWrapper, config: DockDNSConfig):
