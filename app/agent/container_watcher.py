@@ -120,8 +120,7 @@ class DockerWatcher:
 
                 time.sleep(0.5)  # Polling interval
             except Exception as e:
-                logger.error(f"[ERROR] Main loop failed: {e}", exc_info=True)
-                time.sleep(5)
+                logger.error(f"[ERROR] Error in main loop: {e}. Continue to work...", exc_info=True)
         logger.info("[STOP] Agent stopped watching Docker events.")
 
     def stop(self):
