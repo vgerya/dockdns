@@ -63,7 +63,7 @@ def init_existing_containers(client: DockerClient, config: DockDNSConfig,):
     logger.info("[INIT] Checking existing containers...")
     for container in client.containers.list(filters={"status": "running"}):
         try:
-            wrapper = ContainerWrapper(container.labels)
+            wrapper = ContainerWrapper(container)
             if wrapper.disabled:
                 logger.info(f"[INIT] DockDNS disabled for {wrapper}. Skipping.")
                 continue
