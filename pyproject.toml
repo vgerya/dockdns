@@ -21,7 +21,15 @@ pytest = "^8.0"
 httpx = "^0.27"
 ruff = "^0.4.0"
 mypy = "^1.10.0"
+testcontainers = "^4.12.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+#markers = [
+#    { name = "functional", description = "mark as functional/integration tests" },
+#] make it works!!!

@@ -1,0 +1,4 @@
+[loggers]
+dockdns.level = "DEBUG"
+
+testcontainers.core.container.level = "DEBUG"
